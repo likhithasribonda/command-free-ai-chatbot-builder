@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{% block title %}CodeFree AI{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/style.css" />
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+  </head>
+
+  <body class="{{ body_class | default('') }}">
+    <div class="sidebar-overlay" onclick="toggleSidebar()"></div>
+    <div class="app-layout">
+      <!-- Sidebar (always in DOM) -->
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <a href="/dashboard" class="sidebar-logo-link">
+            <img src="/static/favicon.svg" alt="CodeFree AI" class="sidebar-logo" />
+            <span>CodeFree AI</span>
+          </a>
+          <button onclick="location.href = '/bots/new'">+ New Bot</button>
+        </div>
+
+        <ul id="bot-list">
+          {% block bot_list %}{% endblock %}
+        </ul>
+
+        <div class="sidebar-footer">
+          <button class="theme-toggle" onclick="toggleTheme()" style="background:transparent;border:1px solid rgba(255,255,255,0.2);margin-bottom:10px;">🌙 Dark Mode</button>
+          <button onclick="logout()">Logout</button>
+        </div>
+      </aside>
+
+      <!-- Main panel -->
+      <main class="main-panel">
+        <!-- Mobile Header -->
+        <div class="mobile-header">
+          <button class="menu-toggle" onclick="toggleSidebar()">
+            <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+          </button>
+          <h2>CodeFree AI</h2>
+        </div>
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+
+    <script>
+      // Theme Management
+      function toggleTheme() {
+        const doc = document.documentElement;
+        const btn = document.querySelector('.theme-toggle');
+        if (doc.getAttribute('data-theme') === 'dark') {
+          doc.removeAttribute('data-theme');
+          localStorage.setItem('theme', 'light');
+          if (btn) btn.innerText = '🌙 Dark Mode';
+        } else {
+          doc.setAttribute('data-theme', 'dark');
+          localStorage.setItem('theme', 'dark');
+          if (btn) btn.innerText = '☀️ Light Mode';
+        }
+      }
+
+      // Load saved theme immediately to prevent flash
+      if (localStorage.getItem('theme') === 'dark') {
+        document.documentElement.setAttribute('data-theme', 'dark');
+        window.addEventListener('DOMContentLoaded', () => {
+          const btn = document.querySelector('.theme-toggle');
+          if (btn) btn.innerText = '☀️ Light Mode';
+        });
+      }
+
+      function toggleSidebar() {
+        document.querySelector('.sidebar').classList.toggle('open');
+        document.querySelector('.sidebar-overlay').classList.toggle('show');
+      }
+
+      function logout() {
+        localStorage.removeItem("user_id");
+        window.location.href = "/";
+      }
+    </script>
+    <script>
+      const HOST = window.location.origin;
+      const USER_ID = localStorage.getItem("user_id");
+
+      if (!USER_ID && window.location.pathname !== "/") {
+        // Redirect to login immediately — prevents failed API calls
+        window.location.href = "/";
+      }
+
+      // read active bot id from URL (?bot=...)
+      function getActiveBotId() {
+        const params = new URLSearchParams(window.location.search);
+        return params.get("bot");
+      }
+
+      async function loadSidebarBots() {
+        if (!USER_ID) return;
+
+        const res = await fetch(`${HOST}/bots/my?user_id=${USER_ID}`);
+        if (!res.ok) return;
+
+        const bots = await res.json();
+        const list = document.getElementById("bot-list");
+        if (!list) return;
+
+        const activeBotId = getActiveBotId();
+        list.innerHTML = "";
+
+        const BOT_COLORS = [
+          '#667eea', '#764ba2', '#f093fb', '#10a37f',
+          '#2563eb', '#7c3aed', '#db2777', '#ea580c',
+          '#0891b2', '#059669', '#4f46e5', '#9333ea'
+        ];
+
+        function getBotColor(name) {
+          let hash = 0;
+          for (let i = 0; i < name.length; i++) {
+            hash = name.charCodeAt(i) + ((hash << 5) - hash);
+          }
+          return BOT_COLORS[Math.abs(hash) % BOT_COLORS.length];
+        }
+
+        bots.forEach((bot) => {
+          const li = document.createElement("li");
+          li.className = "bot-item";
+
+          // Highlight active bot
+          if (bot.id === activeBotId) {
+            li.classList.add("active");
+          }
+
+          const nameSpan = document.createElement("span");
+          nameSpan.className = "bot-name";
+          nameSpan.innerText = bot.name;
+          nameSpan.onclick = () => {
+            window.location.href = `/dashboard?bot=${bot.id}`;
+          };
+
+          const menuBtn = document.createElement("button");
+          menuBtn.className = "bot-menu-btn";
+          menuBtn.innerText = "⋮";
+          menuBtn.onclick = (e) => {
+            e.stopPropagation();
+            toggleBotMenu(bot.id);
+          };
+
+          const menu = document.createElement("div");
+          menu.className = "bot-menu hidden";
+          menu.id = `menu-${bot.id}`;
+          menu.innerHTML = `
+            <div onclick="renameBot('${bot.id}')">Rename</div>
+            <div onclick="goToRetrain('${bot.id}')">Retrain</div>
+            <div onclick="showWidget('${bot.id}')">Show Widget</div>
+            <div class="danger" onclick="deleteBot('${bot.id}')">Delete</div>
+          `;
+          menu.addEventListener("click", (e) => e.stopPropagation());
+
+          li.appendChild(nameSpan);
+          li.appendChild(menuBtn);
+          li.appendChild(menu);
+          list.appendChild(li);
+        });
+      }
+
+      function toggleBotMenu(botId) {
+        const menu = document.getElementById(`menu-${botId}`);
+        if (!menu) return;
+
+        const isOpen = !menu.classList.contains("hidden");
+
+        // close all menus first
+        document
+          .querySelectorAll(".bot-menu")
+          .forEach((m) => m.classList.add("hidden"));
+
+        // toggle current one
+        if (!isOpen) {
+          menu.classList.remove("hidden");
+        }
+      }
+
+      function goToRetrain(botId) {
+        window.location.href = `/bots/new?bot_id=${botId}`;
+      }
+
+      function showWidget(botId) {
+        const modal = document.getElementById("widget-modal");
+        const textarea = document.getElementById("widget-code");
+
+        const widgetCode =
+          "<scr" +
+          "ipt>\n" +
+          "  window.__NO_CODE_BOT__ = {\n" +
+          '    BOT_ID: "' +
+          botId +
+          '",\n' +
+          '    HOST: "' +
+          window.location.origin +
+          '"\n' +
+          "  };\n" +
+          "</scr" +
+          "ipt>\n" +
+          "<scr" +
+          'ipt src="' +
+          window.location.origin +
+          '/static/widget.js"></scr' +
+          "ipt>";
+
+        textarea.value = widgetCode;
+        modal.classList.remove("hidden");
+      }
+
+      async function renameBot(botId) {
+        const newName = prompt("Enter new bot name:");
+        if (!newName) return;
+
+        await fetch(`/bots/${botId}/rename`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: newName }),
+        });
+
+        loadSidebarBots();
+      }
+
+      async function deleteBot(botId) {
+        const first = confirm("Are you sure you want to delete this bot?");
+        if (!first) return;
+
+        const second = confirm("This action is irreversible. Delete?");
+        if (!second) return;
+
+        await fetch(`/bots/${botId}`, { method: "DELETE" });
+        loadSidebarBots();
+        window.location.href = "/dashboard";
+      }
+
+      function closeWidgetModal() {
+        document.getElementById("widget-modal").classList.add("hidden");
+      }
+
+      function copyWidgetCode() {
+        const textarea = document.getElementById("widget-code");
+        textarea.select();
+        document.execCommand("copy");
+        if (typeof showToast === 'function') {
+          showToast("Widget code copied!", "success");
+        } else {
+          alert("Widget code copied!");
+        }
+      }
+
+      document.addEventListener("DOMContentLoaded", loadSidebarBots);
+
+      // Close bot menu when clicking outside
+      document.addEventListener("click", () => {
+        document
+          .querySelectorAll(".bot-menu")
+          .forEach((menu) => menu.classList.add("hidden"));
+      });
+    </script>
+
+    {% block scripts %}{% endblock %}
+    <!-- Widget Modal -->
+    <div id="widget-modal" class="modal hidden">
+      <div class="modal-overlay" onclick="closeWidgetModal()"></div>
+
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Widget Embed Code</h3>
+          <button class="close-btn" onclick="closeWidgetModal()">×</button>
+        </div>
+
+        <p class="modal-subtitle">
+          Copy and paste this script into your website.
+        </p>
+
+        <textarea id="widget-code" readonly></textarea>
+
+        <div class="modal-actions">
+          <button onclick="copyWidgetCode()">Copy Code</button>
+        </div>
+      </div>
+    </div>
+    <!-- Markdown renderer -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <!-- HTML sanitizer (VERY IMPORTANT) -->
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+
+    <!-- Global Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+    <script>
+      function showToast(message, type = 'success') {
+        const container = document.getElementById('toast-container');
+        const toast = document.createElement('div');
+        toast.className = `toast toast-${type}`;
+        
+        // Icon based on type
+        let icon = '';
+        if (type === 'success') icon = '✓';
+        else if (type === 'error') icon = '✕';
+        else icon = 'ℹ';
+        
+        toast.innerHTML = `
+          <div class="toast-icon">${icon}</div>
+          <div class="toast-message">${message}</div>
+        `;
+        
+        container.appendChild(toast);
+        
+        // Trigger animation
+        requestAnimationFrame(() => {
+          toast.classList.add('show');
+        });
+        
+        // Remove after 3s
+        setTimeout(() => {
+          toast.classList.remove('show');
+          setTimeout(() => toast.remove(), 300); // Wait for transition
+        }, 3000);
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,643 @@
+{% extends "base.html" %} {% block title %}Create Bot | CodeFree AI{% endblock %} {% block content %}
+
+<div class="create-bot-container">
+
+  <div class="create-bot-card">
+
+    <h2 class="form-title">{{ "Retrain Bot" if bot else "Train New Bot" }}</h2>
+
+    <p class="form-subtitle">
+
+      {{ "Update your bot's knowledge and capabilities with fresh data." if bot else "Create and train a new intelligent chatbot using your documents and data." }}
+
+    </p>
+
+
+
+    {% if bot %}
+
+    <div class="alert alert-warning">
+
+     Retraining will replace existing knowledge. Make sure you have backups if needed.
+
+    </div>
+
+    {% endif %}
+
+
+
+    <!-- Bot Configuration Section -->
+
+    <div class="form-section">
+
+      <label for="bot-name">Bot Name</label>
+
+      <input
+
+        id="bot-name"
+
+        name="name"
+
+        value="{{ bot.name if bot else '' }}"
+
+        placeholder="Enter a descriptive name for your bot"
+
+        required
+
+      />
+
+
+
+      <label for="bot-instructions">Bot Instructions</label>
+
+      <textarea 
+
+        id="bot-instructions" 
+
+        placeholder="Define your bot's personality, behavior, and specific instructions..."
+
+        required
+
+      >{{ bot.instructions if bot else '' }}</textarea>
+
+    </div>
+
+
+
+    <!-- Training Data Section -->
+
+    <div class="form-section">
+
+      <label>Q&A CSV Files</label>
+      <div class="dropzone" id="csv-dropzone">
+        <svg viewBox="0 0 24 24" width="32" height="32" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" class="dropzone-icon"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><line x1="9" y1="15" x2="15" y2="15"></line></svg>
+        <p>Drag & drop CSV files here, or <span class="browse-link" onclick="document.getElementById('csv-files').click()">browse</span></p>
+        <input type="file" id="csv-files" accept=".csv" multiple class="hidden-file-input" />
+      </div>
+
+      <p class="hint-text">
+
+        CSV files must contain <b>question</b> and <b>answer</b> columns. Upload multiple files to batch train your bot.
+
+      </p>
+
+      <!-- Existing CSV Files -->
+      <div id="existing-csv-files" class="existing-files" style="display: none;">
+        <h4>Current CSV Files:</h4>
+        <div id="csv-files-list" class="files-list"></div>
+      </div>
+
+      <!-- Removed CSV Files -->
+      <div id="removed-csv-files" class="removed-files" style="display: none;">
+        <h4>Removed CSV Files:</h4>
+        <div id="csv-removed-list" class="files-list"></div>
+      </div>
+
+
+
+      <label>Knowledge Documents</label>
+      <div class="dropzone" id="doc-dropzone">
+        <svg viewBox="0 0 24 24" width="32" height="32" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" class="dropzone-icon"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><line x1="9" y1="15" x2="15" y2="15"></line></svg>
+        <p>Drag & drop documents here, or <span class="browse-link" onclick="document.getElementById('doc-files').click()">browse</span></p>
+        <input type="file" id="doc-files" accept=".pdf,.docx,.txt" multiple class="hidden-file-input" />
+      </div>
+
+      <p class="hint-text">
+
+        Supported formats: PDF, DOCX, TXT. These documents will be used to build your bot's knowledge base.
+
+      </p>
+
+      <!-- Existing Document Files -->
+      <div id="existing-doc-files" class="existing-files" style="display: none;">
+        <h4>Current Documents:</h4>
+        <div id="doc-files-list" class="files-list"></div>
+      </div>
+
+      <!-- Removed Document Files -->
+      <div id="removed-doc-files" class="removed-files" style="display: none;">
+        <h4>Removed Documents:</h4>
+        <div id="doc-removed-list" class="files-list"></div>
+      </div>
+
+    </div>
+
+
+
+    <button class="primary" onclick="submitBot()" id="train-button">
+      {{ "Retrain Bot" if bot else "Train Bot" }}
+    </button>
+
+    <div id="train-status"></div>
+  </div>
+</div>
+
+
+
+{% endblock %} {% block scripts %}
+
+<script>
+
+  const BOT_ID = "{{ bot.id if bot else '' }}";
+
+  // File state management
+  let existingCsvFiles = [];
+  let existingDocFiles = [];
+  let removedCsvFiles = [];
+  let removedDocFiles = [];
+  let newCsvFiles = [];
+  let newDocFiles = [];
+
+  // Load existing files when page loads
+  document.addEventListener('DOMContentLoaded', function() {
+    if (BOT_ID) {
+      loadExistingFiles();
+    }
+    
+    // Add file input listeners for immediate preview
+    setupFileInputListeners();
+  });
+
+  function setupFileInputListeners() {
+    setupDragAndDrop('csv-dropzone', 'csv-files', 'csv');
+    setupDragAndDrop('doc-dropzone', 'doc-files', 'doc');
+
+    document.getElementById('csv-files').addEventListener('change', function(e) {
+      handleNewFiles(e.target.files, 'csv');
+    });
+    
+    document.getElementById('doc-files').addEventListener('change', function(e) {
+      handleNewFiles(e.target.files, 'doc');
+    });
+  }
+
+  function setupDragAndDrop(dropzoneId, inputId, fileType) {
+    const dropzone = document.getElementById(dropzoneId);
+    const input = document.getElementById(inputId);
+
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropzone.classList.add('dragover');
+    });
+
+    dropzone.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+    });
+
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+      
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        input.files = e.dataTransfer.files;
+        handleNewFiles(e.dataTransfer.files, fileType);
+      }
+    });
+  }
+
+  function handleNewFiles(files, fileType) {
+    const newFilesArray = fileType === 'csv' ? newCsvFiles : newDocFiles;
+    
+    // Clear previous new files for this type
+    newFilesArray.length = 0;
+    
+    // Add new files to array
+    for (let i = 0; i < files.length; i++) {
+      newFilesArray.push({
+        file: files[i],
+        filename: files[i].name,
+        file_size: files[i].size,
+        file_type: fileType
+      });
+    }
+    
+    // Update display
+    updateFileDisplay();
+  }
+
+  async function loadExistingFiles() {
+    try {
+      const response = await fetch(`${HOST}/bots/${BOT_ID}/files`);
+      const data = await response.json();
+      
+      if (data.ok) {
+        existingCsvFiles = data.files.csv_files || [];
+        existingDocFiles = data.files.doc_files || [];
+        updateFileDisplay();
+      }
+    } catch (error) {
+      console.error('Failed to load existing files:', error);
+    }
+  }
+
+  function updateFileDisplay() {
+    displayCurrentFiles(existingCsvFiles, newCsvFiles, 'csv');
+    displayCurrentFiles(existingDocFiles, newDocFiles, 'doc');
+    displayRemovedFiles(removedCsvFiles, 'csv');
+    displayRemovedFiles(removedDocFiles, 'doc');
+  }
+
+  function displayCurrentFiles(existingFiles, newFiles, fileType) {
+    const containerId = fileType === 'csv' ? 'existing-csv-files' : 'existing-doc-files';
+    const listId = fileType === 'csv' ? 'csv-files-list' : 'doc-files-list';
+    
+    const container = document.getElementById(containerId);
+    const list = document.getElementById(listId);
+    
+    const allCurrentFiles = [...existingFiles, ...newFiles];
+    
+    if (allCurrentFiles.length > 0) {
+      container.style.display = 'block';
+      list.innerHTML = '';
+      
+      // Display existing files
+      existingFiles.forEach(file => {
+        const fileItem = createFileItem(file, 'existing', fileType);
+        list.appendChild(fileItem);
+      });
+      
+      // Display new files
+      newFiles.forEach(file => {
+        const fileItem = createFileItem(file, 'new', fileType);
+        list.appendChild(fileItem);
+      });
+    } else {
+      container.style.display = 'none';
+    }
+  }
+
+  function displayRemovedFiles(files, fileType) {
+    const containerId = fileType === 'csv' ? 'removed-csv-files' : 'removed-doc-files';
+    const listId = fileType === 'csv' ? 'csv-removed-list' : 'doc-removed-list';
+    
+    const container = document.getElementById(containerId);
+    const list = document.getElementById(listId);
+    
+    if (files.length > 0) {
+      container.style.display = 'block';
+      list.innerHTML = '';
+      
+      files.forEach(file => {
+        const fileItem = createFileItem(file, 'removed', fileType);
+        list.appendChild(fileItem);
+      });
+    } else {
+      container.style.display = 'none';
+    }
+  }
+
+  function createFileItem(file, state, fileType) {
+    const fileItem = document.createElement('div');
+    fileItem.className = `file-item file-item-${state}`;
+    
+    let statusHtml = '';
+    let buttonText = '';
+    let buttonAction = '';
+    let buttonClass = '';
+    
+    if (state === 'new') {
+      statusHtml = '<span class="file-status file-status-new">New</span>';
+      buttonText = '✕';
+      buttonAction = `removeNewFile('${file.filename}', '${fileType}')`;
+      buttonClass = 'remove-file-btn';
+    } else if (state === 'removed') {
+      statusHtml = '<span class="file-status file-status-removed">Removed</span>';
+      buttonText = 'Add to current files';
+      buttonAction = `restoreFile('${file.id}', '${fileType}', '${file.filename}')`;
+      buttonClass = 'add-file-btn';
+    } else {
+      buttonText = '✕';
+      buttonAction = `removeExistingFile('${file.id}', '${fileType}', '${file.filename}')`;
+      buttonClass = 'remove-file-btn';
+    }
+    
+    fileItem.innerHTML = `
+      <div class="file-info">
+        <span class="file-name">${file.filename}</span>
+        <span class="file-size">(${formatFileSize(file.file_size)})</span>
+        ${statusHtml}
+      </div>
+      <button class="${buttonClass}" onclick="${buttonAction}">
+        ${buttonText}
+      </button>
+    `;
+    
+    return fileItem;
+  }
+
+  function removeNewFile(filename, fileType) {
+    const newFilesArray = fileType === 'csv' ? newCsvFiles : newDocFiles;
+    const index = newFilesArray.findIndex(f => f.filename === filename);
+    if (index > -1) {
+      newFilesArray.splice(index, 1);
+    }
+    
+    // Don't clear file input — state is managed via newCsvFiles/newDocFiles arrays
+    // and the display is handled by updateFileDisplay()
+    
+    updateFileDisplay();
+  }
+
+  function removeExistingFile(fileId, fileType, filename) {
+    const existingFilesArray = fileType === 'csv' ? existingCsvFiles : existingDocFiles;
+    const removedFilesArray = fileType === 'csv' ? removedCsvFiles : removedDocFiles;
+    
+    // Find and remove from existing files
+    const index = existingFilesArray.findIndex(f => f.id === fileId);
+    if (index > -1) {
+      const file = existingFilesArray.splice(index, 1)[0];
+      // Add to removed files
+      removedFilesArray.push(file);
+    }
+    
+    updateFileDisplay();
+  }
+
+  function restoreFile(fileId, fileType, filename) {
+    const existingFilesArray = fileType === 'csv' ? existingCsvFiles : existingDocFiles;
+    const removedFilesArray = fileType === 'csv' ? removedCsvFiles : removedDocFiles;
+    
+    // Find and remove from removed files
+    const index = removedFilesArray.findIndex(f => f.id === fileId);
+    if (index > -1) {
+      const file = removedFilesArray.splice(index, 1)[0];
+      // Add back to existing files
+      existingFilesArray.push(file);
+    }
+    
+    updateFileDisplay();
+  }
+
+  function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  }
+
+  async function submitBot() {
+
+    const isRetrain = "{{ 'true' if bot else 'false' }}" === "true";
+
+    const trainButton = document.getElementById("train-button");
+
+    const statusElement = document.getElementById("train-status");
+
+
+
+    let botId = BOT_ID;
+
+
+
+    if (isRetrain) {
+
+      const ok = confirm(
+
+        "Are you sure you want to update this bot?\nExisting knowledge will be replaced.",
+
+      );
+
+      if (!ok) return;
+
+    }
+
+
+
+    // Add loading state
+
+    trainButton.classList.add('loading');
+
+    trainButton.disabled = true;
+
+    statusElement.className = 'loading';
+
+    statusElement.innerHTML = '🔄 Training in progress. Please wait...';
+
+
+
+    const name = document.getElementById("bot-name").value;
+
+    const instructions = document.getElementById("bot-instructions").value;
+
+    const csvFiles = document.getElementById("csv-files").files;
+
+    const docFiles = document.getElementById("doc-files").files;
+
+
+
+    // Validation
+
+    if (!name.trim()) {
+
+      showStatus('error', '❌ Please enter a bot name.');
+
+      resetButtonState();
+
+      return;
+
+    }
+
+
+
+    if (!instructions.trim()) {
+
+      showStatus('error', '❌ Please provide bot instructions.');
+
+      resetButtonState();
+
+      return;
+
+    }
+
+
+
+    // Validation - allow training if there are existing files, new files, or files to remove
+    const hasExistingFiles = existingCsvFiles.length > 0 || existingDocFiles.length > 0;
+    const hasNewFiles = newCsvFiles.length > 0 || newDocFiles.length > 0;
+    const hasRemovedFiles = removedCsvFiles.length > 0 || removedDocFiles.length > 0;
+    
+    // For new bots, require files. For retraining, allow operations on existing files.
+    if (!botId && !hasNewFiles) {
+      showStatus('error', '❌ Please upload at least one CSV file or document.');
+      resetButtonState();
+      return;
+    }
+    
+    // Allow metadata-only retrains (name/instructions changes)
+    // The backend handles this correctly and returns "Bot updated successfully"
+
+
+
+    try {
+
+      if (!botId) {
+
+        // Create bot first
+
+        const res = await fetch(HOST + "/bots/create", {
+
+          method: "POST",
+
+          headers: { "Content-Type": "application/json" },
+
+          body: JSON.stringify({ user_id: USER_ID, name, instructions }),
+
+        });
+
+        
+
+        if (!res.ok) {
+
+          throw new Error('Failed to create bot');
+
+        }
+
+        
+
+        const data = await res.json();
+
+        botId = data.bot_id;
+
+      }
+
+
+
+      // Upload training files
+      const formData = new FormData();
+
+      formData.append("name", name);
+      formData.append("instructions", instructions);
+      
+      // Add file operations data
+      const allRemovedFiles = [...removedCsvFiles, ...removedDocFiles];
+      formData.append("files_to_remove", JSON.stringify(allRemovedFiles));
+      
+      // Add new files
+      for (const f of newCsvFiles) formData.append("csv_files", f.file);
+      for (const f of newDocFiles) formData.append("doc_files", f.file);
+
+
+
+      const trainRes = await fetch(`${HOST}/bots/${botId}/index`, {
+
+        method: "POST",
+
+        body: formData,
+
+      });
+
+
+
+      const data = await trainRes.json();
+
+      
+
+      if (!trainRes.ok || !data.ok) {
+
+        // Handle different error types
+
+        let errorMessage = "Training failed. ";
+
+        
+
+        if (data.error_type === "csv_errors") {
+
+          errorMessage += data.message + "\n\n";
+
+          data.csv_errors.forEach(err => {
+
+            errorMessage += `• ${err.file}: ${err.error}\n`;
+
+          });
+
+        } else if (data.error_type === "doc_errors") {
+
+          errorMessage += data.message + "\n\n";
+
+          data.doc_errors.forEach(err => {
+
+            errorMessage += `• ${err.file}: ${err.error}\n`;
+
+          });
+
+        } else if (data.error_type === "url_errors") {
+
+          errorMessage += data.message + "\n\n";
+
+          data.url_errors.forEach(err => {
+
+            errorMessage += `• ${err.source}: ${err.error}\n`;
+
+          });
+
+        } else if (data.error_type === "indexing_error") {
+
+          errorMessage += data.message;
+
+        } else {
+          errorMessage += data.error || data.message || "Unknown error occurred.";
+        }
+
+        showStatus('error', `❌ ${errorMessage}`);
+        return;
+      }
+
+      // Success
+      showStatus('success', '✅ Training completed successfully! Redirecting to dashboard...');
+      
+      // Reload existing files if this is a retrain
+      if (isRetrain) {
+        setTimeout(() => {
+          loadExistingFiles();
+        }, 1000);
+      }
+      
+      setTimeout(() => {
+        window.location.href = `/dashboard?bot=${botId}`;
+      }, 2000);
+
+    } catch (error) {
+      console.error("Training error:", error);
+      showStatus('error', '❌ Training failed. Please check your internet connection and try again.');
+    } finally {
+      resetButtonState();
+    }
+
+  }
+
+
+
+  function showStatus(type, message) {
+
+    const statusElement = document.getElementById("train-status");
+
+    statusElement.className = type;
+
+    statusElement.innerHTML = message;
+
+  }
+
+
+
+  function resetButtonState() {
+
+    const trainButton = document.getElementById("train-button");
+
+    trainButton.classList.remove('loading');
+
+    trainButton.disabled = false;
+
+  }
+
+
+
+  // Old file input feedback logic removed as we now use drag-and-drop and have dynamic lists
+
+</script>
+
+
+
+{% endblock %}
+

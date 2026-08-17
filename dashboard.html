@@ -1,0 +1,289 @@
+{% extends "base.html" %} {% block title %}Dashboard | CodeFree AI{% endblock %}
+{% block content %} {% if not bot_id %}
+<!-- EMPTY DASHBOARD -->
+<div class="empty-state">
+  <div class="empty-state-icon">
+    <img src="/static/favicon.svg" alt="CodeFree AI" style="width:48px;height:48px;" />
+  </div>
+  <h2>Welcome to CodeFree AI</h2>
+  <p>Build intelligent chatbots trained on your own data. Get started in three simple steps.</p>
+
+  <div class="quick-start">
+    <div class="quick-start-step">
+      <span class="step-number">1</span>
+      <span class="step-label">Create a Bot</span>
+    </div>
+    <div class="quick-start-step">
+      <span class="step-number">2</span>
+      <span class="step-label">Upload Data</span>
+    </div>
+    <div class="quick-start-step">
+      <span class="step-number">3</span>
+      <span class="step-label">Start Chatting</span>
+    </div>
+  </div>
+
+  <button class="cta-btn" onclick="location.href='/bots/new'">Train Your Bot</button>
+</div>
+
+{% else %}
+<!-- BOT DASHBOARD -->
+<div class="bot-header">
+  <div>
+    <h2 id="bot-title" class="bot-title"></h2>
+    <p class="bot-subtitle">Your trained AI chatbot</p>
+  </div>
+
+  <div class="bot-actions">
+    <button class="primary" onclick="goToTrain()">Retrain</button>
+    <button class="secondary" onclick="toggleEmbed()">Widget</button>
+  </div>
+</div>
+
+<!-- Embed code -->
+<div id="embed-box" class="embed-box hidden">
+  <pre id="embed-code"></pre>
+  <button onclick="copyEmbed()">Copy</button>
+</div>
+
+<div class="chat-section">
+  <div class="chat-hint">Ask something from your trained bot</div>
+
+  <div class="chat-container hidden">
+    <div id="chat-box" class="chat-box"></div>
+
+    <div class="chat-input">
+      <input
+        id="chat-message"
+        placeholder="Type your message..."
+        onkeydown="if (event.key === 'Enter') sendMessage();"
+      />
+      <button onclick="sendMessage()">Send</button>
+    </div>
+  </div>
+</div>
+
+{% endif %} {% endblock %} {% block scripts %}
+
+<script>
+  console.log("DASHBOARD SCRIPT LOADED");
+
+  const BOT_ID = "{{ bot_id }}";
+
+  if (!USER_ID) {
+    window.location.href = "/";
+  }
+
+  function scrollChatToBottom() {
+    const chatBox = document.getElementById("chat-box");
+    chatBox.scrollTop = chatBox.scrollHeight;
+  }
+
+  async function loadBotTitle() {
+    if (!BOT_ID) return;
+
+    const botsRes = await fetch(`${HOST}/bots/my?user_id=${USER_ID}`);
+    const bots = await botsRes.json();
+    const bot = bots.find((b) => b.id === BOT_ID);
+
+    if (!bot) return;
+
+    document.getElementById("bot-title").innerText = bot.name;
+
+    // check training status
+    const statusRes = await fetch(`${HOST}/bots/${BOT_ID}/status`);
+    const status = await statusRes.json();
+
+    if (!status.trained) {
+      document.querySelector(".chat-hint").innerText =
+        "⚠️ This bot is not trained yet. Click Retrain to train it.";
+      return;
+    }
+
+    // trained → enable chat
+    document.querySelector(".chat-container").classList.remove("hidden");
+  }
+
+  function goToTrain() {
+    window.location.href = `/bots/new?bot_id=${BOT_ID}`;
+  }
+
+  function toggleEmbed() {
+    const box = document.getElementById("embed-box");
+    const code = document.getElementById("embed-code");
+
+    code.innerText =
+      "<scr" +
+      "ipt>\n" +
+      "  window.__NO_CODE_BOT__ = {\n" +
+      '    BOT_ID: "' +
+      BOT_ID +
+      '",\n' +
+      '    HOST: "' +
+      HOST +
+      '"\n' +
+      "  };\n" +
+      "</scr" +
+      "ipt>\n" +
+      "<scr" +
+      'ipt src="' +
+      HOST +
+      '/static/widget.js"></scr' +
+      "ipt>";
+
+    box.classList.toggle("hidden");
+  }
+
+  function copyEmbed() {
+    navigator.clipboard.writeText(
+      document.getElementById("embed-code").innerText,
+    );
+    if (typeof showToast === 'function') {
+      showToast("Embed code copied!", "success");
+    } else {
+      alert("Embed code copied!");
+    }
+  }
+
+  async function sendMessage() {
+    if (
+      document.querySelector(".chat-container").classList.contains("hidden")
+    ) {
+      if (typeof showToast === 'function') {
+        showToast("Please train the bot before chatting.", "error");
+      } else {
+        alert("Please train the bot before chatting.");
+      }
+      return;
+    }
+
+    const input = document.getElementById("chat-message");
+    const button = document.querySelector(".chat-input button");
+    const message = input.value.trim();
+    if (!message) return;
+
+    // Disable input
+    input.disabled = true;
+    button.disabled = true;
+
+    // Add user message
+    appendMessage("You", message);
+    input.value = "";
+
+    // Show typing indicator
+    showTypingIndicator();
+
+    try {
+      const res = await fetch(HOST + "/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: message,
+          user_id: USER_ID,
+          bot_id: BOT_ID,
+        }),
+      });
+
+      const data = await res.json();
+
+      // Create bot message with avatar
+      const box = document.getElementById("chat-box");
+
+      // Remove typing indicator
+      const typingEl = document.getElementById("typing-indicator");
+      if (typingEl) typingEl.remove();
+
+      const botDiv = document.createElement("div");
+      botDiv.className = "msg bot";
+
+      const avatar = document.createElement("span");
+      avatar.className = "chat-avatar";
+      avatar.innerText = "AI";
+      botDiv.appendChild(avatar);
+
+      const textSpan = document.createElement("span");
+      textSpan.className = "bubble";
+      botDiv.appendChild(textSpan);
+      box.appendChild(botDiv);
+      scrollChatToBottom();
+
+      // Type text word by word
+      typeMarkdown(textSpan, data.response || "No response");
+    } catch (err) {
+      console.error(err);
+      // Remove typing indicator on error
+      const typingEl = document.getElementById("typing-indicator");
+      if (typingEl) typingEl.remove();
+      appendMessage("Bot", "Something went wrong. Please try again.");
+    }
+
+    // Re-enable input
+    input.disabled = false;
+    button.disabled = false;
+    input.focus();
+  }
+
+  function typeMarkdown(element, markdownText, speed = 12) {
+    let i = 0;
+    let buffer = "";
+
+    element.innerHTML = ""; // IMPORTANT: HTML, not text
+
+    const interval = setInterval(() => {
+      if (i >= markdownText.length) {
+        clearInterval(interval);
+        return;
+      }
+
+      buffer += markdownText[i];
+      i++;
+
+      // Convert markdown → HTML → sanitize
+      const rawHtml = marked.parse(buffer);
+      const safeHtml = DOMPurify.sanitize(rawHtml);
+
+      element.innerHTML = safeHtml;
+      scrollChatToBottom();
+    }, speed);
+  }
+
+  function appendMessage(sender, text) {
+    const box = document.getElementById("chat-box");
+    const div = document.createElement("div");
+    div.className = sender === "You" ? "msg user" : "msg bot";
+
+    if (sender !== "You") {
+      const avatar = document.createElement("span");
+      avatar.className = "chat-avatar";
+      avatar.innerText = "AI";
+      div.appendChild(avatar);
+    }
+
+    const bubble = document.createElement("span");
+    bubble.className = "bubble";
+    bubble.innerText = text;
+    div.appendChild(bubble);
+
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function showTypingIndicator() {
+    const box = document.getElementById("chat-box");
+    const typing = document.createElement("div");
+    typing.id = "typing-indicator";
+    typing.className = "typing-indicator";
+    typing.innerHTML = `
+      <span class="chat-avatar">AI</span>
+      <div class="typing-dots">
+        <span></span><span></span><span></span>
+      </div>
+    `;
+    box.appendChild(typing);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  loadBotTitle();
+</script>
+
+{% endblock %}
