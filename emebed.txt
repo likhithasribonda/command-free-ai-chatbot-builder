@@ -1,0 +1,7 @@
+<script>
+  window.__NO_CODE_BOT__ = {
+    BOT_ID: "fb5ed95e-9cfd-477c-97e8-b395df0f3178",
+    HOST: "http://127.0.0.1:8000"
+  };
+</script>
+<script src="http://127.0.0.1:8000/static/widget.js"></script>
